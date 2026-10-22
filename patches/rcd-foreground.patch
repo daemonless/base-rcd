@@ -1,18 +1,32 @@
+diff --git a/sbin/rcd/lib/Makefile b/sbin/rcd/lib/Makefile
+index 49dfb19..7eef794 100644
+--- a/sbin/rcd/lib/Makefile
++++ b/sbin/rcd/lib/Makefile
+@@ -24,7 +24,8 @@ SRCS+=		lposix.c
+ .PATH:		${UCLSRC}/lua
+ SRCS+=		lua_ucl.c
+
+-CWARNFLAGS.lua_ucl.c=	-Wno-cast-align -Wno-cast-qual
++# libucl mum.h, aarch64 branch: "lo = v * p, hi;"
++CWARNFLAGS.lua_ucl.c=	-Wno-cast-align -Wno-cast-qual -Wno-unused-value -Wno-uninitialized
+ CWARNFLAGS.hash.c=	-Wno-cast-align -Wno-cast-qual
+
+ # Embed JSON schemas into the library as C byte arrays.
 diff --git a/sbin/rcd/lib/compat.c b/sbin/rcd/lib/compat.c
 index 81f420f..f977d20 100644
 --- a/sbin/rcd/lib/compat.c
 +++ b/sbin/rcd/lib/compat.c
 @@ -309,6 +309,10 @@ compat_load_rcvars(struct rcd_config *cfg)
- 
+
  	cfg->cfg_rcvars = hash_new();
- 
+
 +	/* No rc(8) installed (a container image): nothing to read. */
 +	if (access("/etc/rc.subr", R_OK) != 0)
 +		return (0);
 +
  	if (pipe(pipefd) != 0)
  		return (-1);
- 
+
 diff --git a/sbin/rcd/rcd/main.c b/sbin/rcd/rcd/main.c
 index 55d6b6c..2b375d3 100644
 --- a/sbin/rcd/rcd/main.c
@@ -23,13 +37,13 @@ index 55d6b6c..2b375d3 100644
  	int ch;
 -	bool upgrading;
 +	bool upgrading, foreground;
- 
+
  	memset(&ctx, 0, sizeof(ctx));
  	ctx.ctx_booting = true;
 @@ -42,13 +42,17 @@ main(int argc, char *argv[])
- 
+
  	upgrading = check_upgrade_state();
- 
+
 -	while ((ch = getopt(argc, argv, "v")) != -1) {
 +	foreground = false;
 +	while ((ch = getopt(argc, argv, "Fv")) != -1) {
@@ -53,5 +67,5 @@ index 55d6b6c..2b375d3 100644
 -	if (!upgrading)
 +	if (!upgrading && !foreground)
  		rcd_daemonize();
- 
+
  	/*
