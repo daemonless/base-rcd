@@ -1,0 +1,93 @@
+ARG BASE_VERSION=15-pkg
+
+# Builder: rcd(8), Baptiste Daroussin's service manager, from his branch
+# (not in any FreeBSD release yet) at a pinned commit, plus our patch: -F
+# stays in the foreground (rcd is the container's process), and no rc.conf
+# read when rc(8) isn't installed.
+# It builds in-tree, so fetch just the parts of the src tree it needs.
+FROM ghcr.io/daemonless/base-core:${BASE_VERSION} AS rcd-builder
+
+ARG RCD_REPO="https://github.com/bapt/freebsd-rcd.git"
+ARG RCD_COMMIT="eeb2967f7e723dd0c1691429df5f2e3e1cd156e1"
+
+COPY patches/rcd-foreground.patch /tmp/rcd-foreground.patch
+
+RUN pkg update && pkg install -y \
+        FreeBSD-clang FreeBSD-clibs-dev FreeBSD-toolchain FreeBSD-bmake \
+        FreeBSD-runtime-dev FreeBSD-audit-dev git-lite && \
+    pkg clean -ay && rm -rf /var/cache/pkg/* /var/db/pkg/repos/* && \
+    mkdir /tmp/src && cd /tmp/src && \
+    git init -q && git remote add origin "${RCD_REPO}" && \
+    git sparse-checkout set --no-cone /sbin/rcd/ /sbin/Makefile.inc /share/mk/ \
+        /contrib/libucl/ /contrib/lua/ /lib/liblua/ /lib/libucl/ /libexec/flua/ && \
+    git fetch -q --depth 1 --filter=blob:none origin "${RCD_COMMIT}" && \
+    git checkout -q FETCH_HEAD && \
+    git apply /tmp/rcd-foreground.patch && \
+    export MAKESYSPATH=/tmp/src/share/mk SRCTOP=/tmp/src MAKEOBJDIRPREFIX=/tmp/obj && \
+    for d in lib/liblua lib/libucl sbin/rcd; do \
+        make -C "$d" obj >/dev/null && make -C "$d" -j4 MK_TESTS=no MK_MAN=no >/dev/null || exit 1; \
+    done && \
+    mkdir /tmp/rcd && \
+    for p in rcd rcd-exec rcctl; do \
+        cp "$(find /tmp/obj -type f -name "$p" -perm -u+x)" /tmp/rcd/ || exit 1; \
+    done && \
+    strip /tmp/rcd/*
+
+# Builder: dsu (https://github.com/daemonless/dsu): units drop to bsd with it.
+# rcd-exec's own process.user binds setgroups@FBSD_1.8 (fails on FreeBSD 14
+# kernels) and fails outright under podman --user; dsu does neither.
+FROM ghcr.io/daemonless/base-core:${BASE_VERSION} AS dsu-builder
+
+ARG DSU_VERSION=0.1.0
+ARG DSU_SHA256="03b81a8d73f43a0cf9bc8e99b81278d0cb34028ede1932f91d3a9d0d334298de"
+
+RUN pkg update && pkg install -y \
+        FreeBSD-clang FreeBSD-clibs-dev FreeBSD-toolchain FreeBSD-bmake && \
+    pkg clean -ay && rm -rf /var/cache/pkg/* /var/db/pkg/repos/* && \
+    fetch -qo /tmp/dsu.tar.gz \
+        "https://github.com/daemonless/dsu/archive/refs/tags/v${DSU_VERSION}.tar.gz" && \
+    sha256 -q -c "${DSU_SHA256}" /tmp/dsu.tar.gz && \
+    mkdir /tmp/dsu && tar -xf /tmp/dsu.tar.gz -C /tmp/dsu --strip-components=1 && \
+    make -C /tmp/dsu dsu && strip /tmp/dsu/dsu
+
+# Production image
+FROM ghcr.io/daemonless/base-core:${BASE_VERSION}
+
+ARG PACKAGES=""
+ARG VERSION=""
+ARG FREEBSD_ARCH=amd64
+
+LABEL org.opencontainers.image.title="{{ title }}" \
+    org.opencontainers.image.description="{{ description }}" \
+    org.opencontainers.image.source="{{ repo_url }}" \
+    org.opencontainers.image.url="{{ repo_url }}" \
+    org.opencontainers.image.licenses="{{ license }}" \
+    org.opencontainers.image.vendor="daemonless" \
+    org.opencontainers.image.authors="daemonless" \
+    io.daemonless.type="base" \
+    io.daemonless.category="{{ category }}" \
+    io.daemonless.packages="${PACKAGES}"
+
+# No rc(8): rcd would otherwise run every rc.d script without an rcvar at
+# each start (18 in a jail, some failing). Units live in rcd.d only.
+RUN pkg delete -y FreeBSD-rc && \
+    pkg clean -ay && rm -rf /var/cache/pkg/* /var/db/pkg/repos/*
+
+COPY root/ /
+
+COPY --from=rcd-builder /tmp/rcd/rcd /tmp/rcd/rcd-exec /tmp/rcd/rcctl /sbin/
+COPY --from=dsu-builder /tmp/dsu/dsu /usr/local/bin/dsu
+
+RUN mkdir -p /daemonless/init.d \
+    /run \
+    /usr/local/etc/rcd.d \
+    /daemonless/custom.d \
+    /usr/local/daemonless/bin
+
+# App CLIs an image declares (x-daemonless.cli) are wrapped here by
+# daemonless-cli, so podman exec runs them as bsd. Empty otherwise.
+ENV PATH="/usr/local/daemonless/bin:${PATH}"
+
+RUN chmod +x /init /healthz /daemonless/init.d/* /usr/local/bin/daemonless-cli
+
+ENTRYPOINT ["/init"]

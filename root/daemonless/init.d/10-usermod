@@ -1,0 +1,20 @@
+#!/bin/sh
+# Handles PUID/PGID mapping and /config permissions
+
+if [ "$(id -u)" != 0 ]; then
+    echo "[usermod] Running as $(id -u):$(id -g): no remap, /config ownership is the runtime's"
+    exit 0
+fi
+
+echo "[usermod] Setting up user bsd with PUID=${PUID} PGID=${PGID}"
+
+# Update group
+pw groupmod bsd -g "${PGID}"
+
+# Update user
+pw usermod bsd -u "${PUID}" -g "${PGID}"
+
+echo "[usermod] User bsd configured (uid=$(id -u bsd), gid=$(id -g bsd))"
+
+# Ensure /config is writable
+chown -R bsd:bsd /config

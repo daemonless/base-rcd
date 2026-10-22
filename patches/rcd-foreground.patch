@@ -1,0 +1,57 @@
+diff --git a/sbin/rcd/lib/compat.c b/sbin/rcd/lib/compat.c
+index 81f420f..f977d20 100644
+--- a/sbin/rcd/lib/compat.c
++++ b/sbin/rcd/lib/compat.c
+@@ -309,6 +309,10 @@ compat_load_rcvars(struct rcd_config *cfg)
+ 
+ 	cfg->cfg_rcvars = hash_new();
+ 
++	/* No rc(8) installed (a container image): nothing to read. */
++	if (access("/etc/rc.subr", R_OK) != 0)
++		return (0);
++
+ 	if (pipe(pipefd) != 0)
+ 		return (-1);
+ 
+diff --git a/sbin/rcd/rcd/main.c b/sbin/rcd/rcd/main.c
+index 55d6b6c..2b375d3 100644
+--- a/sbin/rcd/rcd/main.c
++++ b/sbin/rcd/rcd/main.c
+@@ -30,7 +30,7 @@ main(int argc, char *argv[])
+ {
+ 	struct rcd_ctx ctx;
+ 	int ch;
+-	bool upgrading;
++	bool upgrading, foreground;
+ 
+ 	memset(&ctx, 0, sizeof(ctx));
+ 	ctx.ctx_booting = true;
+@@ -42,13 +42,17 @@ main(int argc, char *argv[])
+ 
+ 	upgrading = check_upgrade_state();
+ 
+-	while ((ch = getopt(argc, argv, "v")) != -1) {
++	foreground = false;
++	while ((ch = getopt(argc, argv, "Fv")) != -1) {
+ 		switch (ch) {
++		case 'F':
++			foreground = true;
++			break;
+ 		case 'v':
+ 			log_set_verbose(true);
+ 			break;
+ 		default:
+-			fprintf(stderr, "usage: rcd [-v]\n");
++			fprintf(stderr, "usage: rcd [-Fv]\n");
+ 			return (1);
+ 		}
+ 	}
+@@ -83,7 +87,7 @@ main(int argc, char *argv[])
+ 	 * messages to the console.
+ 	 */
+ 	log_console_open();
+-	if (!upgrading)
++	if (!upgrading && !foreground)
+ 		rcd_daemonize();
+ 
+ 	/*

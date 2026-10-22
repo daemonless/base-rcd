@@ -1,0 +1,61 @@
+#!/bin/sh
+# daemonless container init (rcd): setup scripts, then rcd(8) as PID 1
+# supervising the units in /usr/local/etc/rcd.d.
+#
+# Setup runs here, before rcd, so a failing script stops the container and
+# PUID/PGID are in place before any unit starts. Units drop to bsd with dsu
+# (command = "/usr/local/bin/dsu"; command_args = "bsd ...").
+
+set -e
+
+echo "[init] Starting container initialization..."
+
+uid=$(id -u)
+gid=$(id -g)
+
+if [ "$uid" = 0 ]; then
+	ifconfig lo0 inet 127.0.0.1/8 up || true
+	ifconfig lo0 inet6 ::1/128 up 2>/dev/null || true
+else
+	echo "[init] Running as $uid:$gid: root-only setup is skipped"
+	if [ "${PUID:-$uid}" != "$uid" ] || [ "${PGID:-$gid}" != "$gid" ]; then
+		echo "[init] PUID=${PUID:-} PGID=${PGID:-} ignored: the runtime already set the user"
+	fi
+	case ${HOME:-/} in /) export HOME=/config ;; esac
+	user=$(getent passwd "$uid" | cut -d: -f1)
+	export USER="${user:-$uid}" LOGNAME="${user:-$uid}"
+fi
+
+for script in /daemonless/init.d/*; do
+	[ -x "$script" ] || continue
+	echo "[init] Running: $script"
+	"$script"
+done
+for script in /daemonless/custom.d/*; do
+	[ -x "$script" ] || continue
+	echo "[init] Running custom: $script"
+	"$script"
+done
+
+# rcd starts units with a clean environment; units read the container's from
+# here (process { env_file = "/run/rcd.env"; }). rcd-exec only reads a
+# root-owned file, so as non-root the units get none.
+if [ "$uid" = 0 ]; then
+	mkdir -p /run
+	env | grep -v '^RCD_' > /run/rcd.env
+	chmod 600 /run/rcd.env
+fi
+
+echo "[init] Initialization complete"
+
+# Units win; with none, run the command (podman run base-rcd sh).
+for u in /etc/rcd.d/*.ucl /usr/local/etc/rcd.d/*.ucl; do
+	[ -f "$u" ] || continue
+	exec /sbin/rcd -F
+done
+if [ $# -gt 0 ]; then
+	echo "[init] Executing: $*"
+	exec "$@"
+fi
+echo "[init] No units or command, sleeping..."
+while :; do sleep 86400; done

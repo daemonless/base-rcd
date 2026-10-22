@@ -1,0 +1,19 @@
+name: base-rcd
+
+x-daemonless:
+  title: "FreeBSD Base (rcd)"
+  class: "base"  # built FROM, not deployed: no Deployment section
+  icon: ":simple-freebsd:"
+  category: "Base"
+  description: "FreeBSD base image for multi-service containers, supervised by rcd(8) units in /usr/local/etc/rcd.d (PUID/PGID)"
+  license: "BSD-2-Clause"
+  repo_url: "https://github.com/daemonless/base-rcd"
+  upstream_url: "https://github.com/freebsd/freebsd-src"
+  web_url: "https://www.freebsd.org/"
+  user: "root"
+  upstream_binary: false
+  appjail: false
+
+  docs: {}
+
+services: {}
