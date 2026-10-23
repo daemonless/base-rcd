@@ -1,0 +1,3 @@
+#!/bin/sh
+# AppJail's exec.stop; see /etc/rc.
+exit 0

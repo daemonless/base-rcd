@@ -1,0 +1,5 @@
+#!/bin/sh
+# No rc(8) here: rcd runs the units. AppJail starts every jail with
+# exec.start "/bin/sh /etc/rc", and a jail whose start command fails never
+# reaches the entrypoint, so this only has to succeed.
+exit 0
