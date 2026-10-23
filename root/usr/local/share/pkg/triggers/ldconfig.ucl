@@ -1,0 +1,19 @@
+# base-rcd has no FreeBSD-rc, so a package's "service ldconfig restart"
+# hook fails ("POST-INSTALL script failed") and its library dirs never
+# reach the hints (vaultwarden: libmysqlclient.so.24 not found).
+# Rebuild them here instead, as rc.d/ldconfig would.
+path: "/usr/local/libdata/ldconfig"
+trigger: {
+	type: lua
+	sandbox: false
+	script: <<EOS
+pkg.exec({"/bin/sh", "-c", [[
+ldc=$(/libexec/ld-elf.so.1 -v | sed -n 's/^Default lib path //p' | tr : ' ')
+for d in /usr/lib/compat /usr/local/lib /usr/local/lib/compat/pkg \
+    $(cat /usr/local/libdata/ldconfig/* 2>/dev/null); do
+	[ -r "$d" ] && ldc="$ldc $d"
+done
+/sbin/ldconfig -elf $ldc
+]]})
+EOS
+}
