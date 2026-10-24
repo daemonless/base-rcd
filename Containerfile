@@ -8,8 +8,10 @@ ARG BASE_VERSION=15-pkg
 
 # Builder: rcd(8), Baptiste Daroussin's service manager, from his branch
 # (not in any FreeBSD release yet) at a pinned commit, plus our patch: -F
-# stays in the foreground (rcd is the container's process), and no rc.conf
-# read when rc(8) isn't installed.
+# stays in the foreground (rcd is the container's process), no rc.conf
+# read when rc(8) isn't installed, and the control socket is created once
+# (eeb2967 makes it twice; in a container that leaks an inotify fd whose
+# event is never read, and rcd spins at 100% CPU).
 # It builds in-tree, so fetch just the parts of the src tree it needs.
 FROM ghcr.io/daemonless/base-core:${BASE_VERSION} AS rcd-builder
 

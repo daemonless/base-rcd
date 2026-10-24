@@ -27,8 +27,52 @@ index 81f420f..f977d20 100644
  	if (pipe(pipefd) != 0)
  		return (-1);
 
+diff --git a/sbin/rcd/lib/rcd.c b/sbin/rcd/lib/rcd.c
+index b45e529..42cd3fb 100644
+--- a/sbin/rcd/lib/rcd.c
++++ b/sbin/rcd/lib/rcd.c
+@@ -654,9 +654,17 @@ finish_boot(struct rcd_ctx *ctx)
+ 	 * may not exist yet; deferring creation to the end of boot
+ 	 * avoids the socket being hidden when the tmpfs is mounted
+ 	 * over the parent directory.
++	 *
++	 * If the early socket from main() is still in place (a jail or
++	 * container has /var/run from the start), keep it: a second
++	 * control_init() unlinks it, and the first inotify fd then stays
++	 * readable with nothing reading it, spinning the event loop.
+ 	 */
+-	if (control_init(ctx) != 0)
+-		log_warn("control socket init failed");
++	if (ctx->ctx_ctlsock < 0) {
++		if (control_init(ctx) != 0)
++			log_warn("control socket init failed");
++	} else
++		control_verify(ctx);
+
+ 	if (ctx->ctx_config.cfg_quiet_boot) {
+ 		log_init(ctx->ctx_config.cfg_log_level);
+@@ -1209,6 +1217,19 @@ rcd_main_loop(struct rcd_ctx *ctx)
+ 						log_handle_pipe_event(u, (int)kev->ident);
+ 					else
+ 						handle_sockact_event(ctx, kev);
++				} else {
++					struct kevent del;
++
++					/*
++					 * No owner: a stale registration
++					 * would spin the loop forever.
++					 */
++					log_warn("kevent: unowned fd %d, "
++					    "removing", (int)kev->ident);
++					EV_SET(&del, kev->ident, EVFILT_READ,
++					    EV_DELETE, 0, 0, NULL);
++					kevent(ctx->ctx_kq, &del, 1, NULL, 0,
++					    NULL);
+ 				}
+ 				break;
+ 			case EVFILT_TIMER:
 diff --git a/sbin/rcd/rcd/main.c b/sbin/rcd/rcd/main.c
-index 55d6b6c..2b375d3 100644
+index 55d6b6c..9e5776c 100644
 --- a/sbin/rcd/rcd/main.c
 +++ b/sbin/rcd/rcd/main.c
 @@ -30,7 +30,7 @@ main(int argc, char *argv[])
@@ -69,3 +113,19 @@ index 55d6b6c..2b375d3 100644
  		rcd_daemonize();
 
  	/*
+@@ -136,12 +140,12 @@ main(int argc, char *argv[])
+ 		/*
+ 		 * Re-exec upgrade: restore running services from the
+ 		 * state file.  Skip normal boot: services are already
+-		 * running.  Create a fresh control socket (the old one
+-		 * was closed by exec).
++		 * running.  The control socket was created above unless
++		 * that failed; don't make a second one.
+ 		 */
+ 		restore_state(&ctx);
+ 		ctx.ctx_booting = false;
+-		if (control_init(&ctx) != 0)
++		if (ctx.ctx_ctlsock < 0 && control_init(&ctx) != 0)
+ 			log_warn("control socket init failed");
+ 		log_info("upgrade: state restored, entering supervision");
+ 	} else {
