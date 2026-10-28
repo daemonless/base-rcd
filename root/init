@@ -8,6 +8,10 @@
 
 set -e
 
+# The logo and what this container runs on (DAEMONLESS_BANNER=off hides it).
+# Ships in base-core; an image on an older base-core has none.
+[ -x /daemonless/banner ] && /daemonless/banner || :
+
 echo "[init] Starting container initialization..."
 
 uid=$(id -u)
